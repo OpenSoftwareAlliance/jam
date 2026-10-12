@@ -1,8 +1,10 @@
 import React from 'react';
-import {enterRoom} from '../logic/main';
-import {useMqParser} from '../logic/tailwind-mqp';
+import {use} from 'use-minimal-state';
+import {useMqParser} from '../lib/tailwind-mqp';
 import Container from './Container';
 import RoomHeader from './RoomHeader';
+import {useJam} from '../jam-core-react';
+import {colors} from '../lib/theme.js';
 
 const iOS =
   /^iP/.test(navigator.platform) ||
@@ -14,47 +16,25 @@ export default function EnterRoom({
   roomId,
   name,
   description,
+  schedule,
   closed,
+  forbidden,
   buttonURI,
   buttonText,
   logoURI,
 }) {
+  const [state, {enterRoom, setProps}] = useJam();
   let mqp = useMqParser();
+  let otherDevice = use(state, 'otherDeviceInRoom');
+  let room = use(state, 'room');
+  const roomColors = colors(room);
   return (
     <Container>
       <div className={mqp('p-2 pt-60 md:p-10 md:pt-60')}>
-        <RoomHeader {...{name, description, logoURI, buttonURI, buttonText}} />
-
-        {/*
-            a snapshot of current or nticipated speakers
-            (for scheduled (future) rooms)
-        */}
-        <ol className="hidden flex space-x-4 pt-6">
-          <li className="flex-shrink w-28 h-28 ring-yellow-500">
-            <img
-              className="human-radius border border-gray-300"
-              src="img/avatars/sonic.jpg"
-            />
-          </li>
-          <li className="flex-shrink w-28 h-28">
-            <img
-              className="human-radius border border-gray-300"
-              src="img/avatars/gregor.jpg"
-            />
-          </li>
-          <li className="flex-shrink w-28 h-28">
-            <img
-              className="human-radius border border-gray-300"
-              src="img/avatars/christoph.jpg"
-            />
-          </li>
-          <li className="flex-shrink w-28 h-28">
-            <img
-              className="human-radius border border-gray-300"
-              src="img/avatars/tosh.jpg"
-            />
-          </li>
-        </ol>
+        <RoomHeader
+          colors={roomColors}
+          {...{name, description, logoURI, buttonURI, buttonText}}
+        />
         {/*
             optional (for future events:)
             when is this event?
@@ -62,6 +42,31 @@ export default function EnterRoom({
         <p className="hidden pt-4 pb-4">
           🗓 February 3rd 2021 at ⌚️ 14:06 (Vienna Time)
         </p>
+        {/* warning if peer is in the same room on another device */}
+        {otherDevice && (
+          <div
+            className={
+              'mt-5 mb--1 p-4 text-gray-700 rounded-lg border border-yellow-100 bg-yellow-50'
+            }
+          >
+            <span className="text-gray-900 bg-yellow-200">Warning:</span> You
+            already joined this room from a different device or browser tab.
+            Click {`'`}
+            Join{`'`} to switch to this tab.
+          </div>
+        )}
+        {forbidden && (
+          <div
+            className={
+              'mt-5 mb--1 p-4 text-gray-700 rounded-lg border border-yellow-100 bg-yellow-50'
+            }
+          >
+            <span className="text-gray-900 bg-yellow-200">Warning:</span>
+            <br />
+            You are not allowed to enter this room. Move along!
+          </div>
+        )}
+
         {/*
             button for entering this room
             for now this is possible without
@@ -76,15 +81,34 @@ export default function EnterRoom({
             in the future
         */}
         <button
-          onClick={() => enterRoom(roomId)}
+          onClick={() => {
+            setProps({userInteracted: true});
+            enterRoom(roomId);
+          }}
           className={
-            closed
+            closed || forbidden
               ? 'hidden'
-              : 'mt-5 mb-10 select-none w-full h-12 px-6 text-lg text-white bg-gray-600 rounded-lg focus:shadow-outline active:bg-gray-600'
+              : 'mt-5 select-none w-full h-12 px-6 text-lg text-white bg-gray-600 rounded-lg focus:shadow-outline active:bg-gray-600'
           }
+          style={{
+            backgroundColor: roomColors.buttonPrimary,
+            color: roomColors.background,
+          }}
         >
-          Join this Jam
+          Join
         </button>
+
+        <a
+          className={
+            schedule
+              ? 'block mt-5 text-center h-12 p-3 px-6 text-lg text-gray-500'
+              : 'hidden'
+          }
+          href={`/${roomId}.ics`}
+          download={`${name || 'room'}.ics`}
+        >
+          🗓 Add to Calendar
+        </a>
 
         <div className={iOS ? 'mt-40 text-gray-500 text-center' : 'hidden'}>
           🎧 Use headphones or earbuds

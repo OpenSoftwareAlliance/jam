@@ -1,8 +1,11 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import gfm from 'remark-gfm';
+import {useJamState} from '../jam-core-react/JamContext';
+import {MicOnSvg} from './Svg';
 
 export default function RoomHeader({
+  colors,
   name,
   description,
   logoURI,
@@ -10,11 +13,17 @@ export default function RoomHeader({
   buttonText,
   editRoom,
 }) {
+  let [isRecording, isPodcasting] = useJamState([
+    'isSomeoneRecording',
+    'isSomeonePodcasting',
+  ]);
+  isRecording = isRecording || isPodcasting;
   return (
     <div className="flex room-header">
       {logoURI && (
         <div className="flex-none">
           <img
+            alt={'room icon'}
             className="w-16 h-16 border rounded p-1 m-2 mt-0"
             src={logoURI}
             style={{objectFit: 'cover'}}
@@ -30,27 +39,45 @@ export default function RoomHeader({
             transformLinkUri={customUriTransformer}
             renderers={customRenderers}
           >
-            {description || 'This is a room on Jam'}
+            {description || ''}
           </ReactMarkdown>
           <div
             className={buttonURI && buttonText ? 'call-to-action' : 'hidden'}
           >
             <a
               href={buttonURI}
-              className="select-none align-middle inline-block mt-2 py-2 px-6 text-lg text-gray-600 bg-gray-200 border border-gray-300 rounded-lg focus:shadow-outline active:bg-gray-300"
+              className="select-none align-middle inline-block mt-2 py-2 px-6 text-lg bg-gray-200 border border-gray-300 rounded-lg focus:shadow-outline active:bg-gray-300"
               target="_blank"
               rel="noreferrer"
+              style={{color: colors.text}}
             >
               {buttonText}
             </a>
           </div>
         </div>
       </div>
-      {editRoom && (
-        <div className="flex-none w-8 h-6 cursor-pointer" onClick={editRoom}>
-          <EditSvg />
-        </div>
-      )}
+      <div className="flex-none flex">
+        {isRecording && (
+          <div
+            aria-label="Recording"
+            className="flex items-center w-8 h-6"
+            style={{color: '#ff0000'}}
+          >
+            <MicOnSvg className="h-5" stroke="#ffffff" />
+          </div>
+        )}
+        {editRoom && (
+          <div
+            role="button"
+            aria-label="Room settings"
+            className="w-8 h-6 cursor-pointer"
+            onClick={editRoom}
+            style={{color: colors.text}}
+          >
+            <EditSvg />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -78,7 +105,7 @@ const customRenderers = {
 function EditSvg() {
   return (
     <svg
-      className="text-gray-500 w-6 h-6"
+      className="w-6 h-6"
       xmlns="http://www.w3.org/2000/svg"
       fill="none"
       viewBox="0 0 24 24"

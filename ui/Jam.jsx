@@ -1,36 +1,104 @@
-import React, {createElement, useEffect, useLayoutEffect, useMemo} from 'react';
-import Room from './views/Room';
-import identity from './logic/identity';
-import {useCreateRoom, initializeIdentity} from './logic/backend';
-import {useRoom, maybeConnectRoom, disconnectRoom} from './logic/room';
-import swarm from './lib/swarm';
+import React, {useEffect, useMemo} from 'react';
 import Modals from './views/Modal';
-import state from './logic/state';
-import {mergeClasses, useSync} from './logic/util';
-import {stopAudio} from './logic/audio';
-import {config} from './logic/config';
-import {set} from 'minimal-state';
-import {useProvideWidth, WidthContext} from './logic/tailwind-mqp';
+import {mergeClasses} from './lib/util';
+import {useProvideWidth, WidthContext} from './lib/tailwind-mqp';
 import {use} from 'use-minimal-state';
+import Start from './views/Start';
+import Me from './views/Me';
+import PossibleRoom from './views/PossibleRoom';
+import {declare, declareStateRoot} from './lib/state-tree';
+import {ShowAudioPlayerToast} from './views/AudioPlayerToast';
+import {JamProvider, useJam} from './jam-core-react';
+import {createJam} from './jam-core';
+import {ShowInteractionModal} from './views/InteractionModal';
+import {parseUrlConfig} from './lib/url-utils';
+import {colors} from './lib/theme.js';
 
-export default function Jam({
-  style,
-  className,
-  roomId,
-  newRoom,
-  config,
-  onError,
-  ...props
-}) {
-  useSync(state, {roomId}, [roomId]);
-  let {color} = use(state, 'room');
-  let [width, container, setContainer, mqp] = useProvideWidth();
+let urlConfig = parseUrlConfig(location.search, location.hash);
 
-  useLayoutEffect(() => {
-    if (container && color && color !== '#4B5563') {
-      container.style.backgroundColor = hexToRGB(color, '0.123');
+const [state, api] = createJam({
+  jamConfig: window.jamConfig,
+  initialProps: {roomId: window.existingRoomId ?? null},
+  cachedRooms: window.existingRoomInfo && {
+    [window.existingRoomId]: window.existingRoomInfo,
+  },
+  debug: !!urlConfig.debug,
+});
+
+declareStateRoot(ShowModals, null, {state});
+
+export default function Jam(props) {
+  return (
+    <JamProvider state={state} api={api}>
+      <JamUI {...props} />
+    </JamProvider>
+  );
+}
+
+function JamUI({style, className, route = null, dynamicConfig = {}, ...props}) {
+  const [state, {setProps}] = useJam();
+
+  const defaultRoom = window.jamConfig.defaultRoom || {};
+
+  let roomId = null;
+
+  // routing
+  const View = (() => {
+    switch (route) {
+      case null:
+        return <Start newRoom={{...defaultRoom, ...dynamicConfig.room}} />;
+      case 'me':
+        return <Me />;
+      default:
+        roomId = route;
+        return (
+          <PossibleRoom
+            roomId={route}
+            newRoom={dynamicConfig.room}
+            autoCreate={!!dynamicConfig.ux?.autoCreate}
+            roomIdentity={dynamicConfig.identity}
+            roomIdentityKeys={dynamicConfig.keys}
+            uxConfig={dynamicConfig.ux ?? emptyObject}
+            onError={({error}) => (
+              <Start
+                urlRoomId={route}
+                roomFromURIError={!!error.createRoom}
+                newRoom={dynamicConfig.room}
+              />
+            )}
+          />
+        );
     }
-  }, [color, container]);
+  })();
+
+  // set/unset room id
+  useEffect(() => {
+    let {autoJoin, autoRejoin, userInteracted} = dynamicConfig.ux ?? {};
+    if (autoJoin !== undefined) {
+      setProps('autoJoin', !!autoJoin);
+    }
+    if (autoRejoin !== undefined) {
+      setProps('autoRejoin', !!autoRejoin);
+    }
+    if (userInteracted !== undefined) {
+      setProps('userInteracted', !!userInteracted);
+    }
+    setProps('roomId', roomId);
+  }, [roomId, dynamicConfig.ux, setProps]);
+
+  // global styling
+  // TODO: the color should depend on the loading state of GET /room, to not flash orange before being in the room
+  // => color should be only set here if the route is not a room id, otherwise <PossibleRoom> should set it
+  // => pass a setColor prop to PossibleRoom
+  let {buttonPrimary} = colors(use(state, 'room'));
+  let [width, , setContainer, mqp] = useProvideWidth();
+  let backgroundColor = useMemo(
+    () =>
+      buttonPrimary && buttonPrimary !== '#4B5563'
+        ? hexToRGB(buttonPrimary, '0.123')
+        : undefined,
+    [buttonPrimary]
+  );
 
   return (
     <div
@@ -40,76 +108,20 @@ export default function Jam({
         position: 'relative',
         height: '100%',
         minHeight: '-webkit-fill-available',
+        backgroundColor,
         ...(style || null),
       }}
       {...props}
     >
       <WidthContext.Provider value={width}>
-        <Main {...{roomId, newRoom, config, onError}} />
+        {View}
         <Modals />
       </WidthContext.Provider>
     </div>
   );
 }
 
-function Main({roomId, newRoom, config: customConfig, onError}) {
-  useMemo(() => {
-    if (customConfig) set(config, customConfig);
-  }, []); // TODO: make this react to config changes
-
-  // initialize identity
-  useEffect(() => {
-    initializeIdentity();
-    swarm.config({myPeerId: identity.publicKey});
-    swarm.set('sharedState', {inRoom: false});
-  }, []);
-
-  // fetch room if we are in one
-  let [room, isLoading] = useRoom(roomId);
-
-  // connect to signalhub if room exists (and not already connected)
-  useEffect(() => {
-    if (room) maybeConnectRoom(roomId);
-    if (!room && roomId) disconnectRoom(roomId);
-  }, [room, roomId]);
-  // clean up on navigating away
-  useEffect(() => {
-    if (roomId) {
-      return () => {
-        disconnectRoom(roomId);
-        stopAudio();
-      };
-    }
-  }, [roomId]);
-
-  // if roomId is present but room does not exist, try to create new one
-  let [roomFromURILoading, roomFromURIError] = useCreateRoom({
-    roomId,
-    room,
-    isLoading,
-    newRoom,
-  });
-
-  if (roomId) {
-    if (isLoading) return null;
-    if (room) return <Room room={room} roomId={roomId} />;
-    if (roomFromURILoading) return null;
-  }
-  // TODO: could be nice to document possible errors
-  let error = !roomId
-    ? {noRoomId: true}
-    : roomFromURIError
-    ? {createRoom: true}
-    : {};
-  return typeof onError === 'function'
-    ? createElement(onError, {roomId, error})
-    : onError || <Error />;
-}
-
-// TODO
-function Error() {
-  return <div>An error ocurred</div>;
-}
+const emptyObject = {};
 
 function hexToRGB(hex, alpha) {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -121,4 +133,9 @@ function hexToRGB(hex, alpha) {
   } else {
     return `rgb(${r}, ${g}, ${b})`;
   }
+}
+
+function ShowModals() {
+  declare(ShowAudioPlayerToast);
+  declare(ShowInteractionModal);
 }

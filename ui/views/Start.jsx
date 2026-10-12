@@ -1,25 +1,28 @@
 import React, {useState, useMemo} from 'react';
 import slugify from 'slugify';
 
-import {createRoom, updateApiQuery} from '../logic/backend';
-import swarm from '../lib/swarm';
 import {navigate} from '../lib/use-location';
-import {enterRoom, state} from '../logic/main';
 import Container from './Container';
+import {useJam} from '../jam-core-react';
+import {colors} from '../lib/theme';
 
-export default function Start({urlRoomId, roomFromURIError}) {
-  let [name, setName] = useState('');
-  let [description, setDescription] = useState('');
-  let [color, setColor] = useState('#4B5563');
-  let [logoURI, setLogoURI] = useState('');
-  let [buttonText, setButtonText] = useState('');
-  let [buttonURI, setButtonURI] = useState('');
+export default function Start({newRoom = {}, urlRoomId, roomFromURIError}) {
+  const [, {enterRoom, setProps, createRoom}] = useJam();
 
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  // note: setters are currently unused because form is hidden
+  let [name, setName] = useState(newRoom.name ?? '');
+  let [description, setDescription] = useState(newRoom.description ?? '');
+  let [color, setColor] = useState(newRoom.color ?? '#4B5563');
+  let [logoURI, setLogoURI] = useState(newRoom.logoURI ?? '');
+  let [buttonText, setButtonText] = useState(newRoom.buttonText ?? '');
+  let [buttonURI, setButtonURI] = useState(newRoom.buttonURI ?? '');
+  let {stageOnly = false} = newRoom;
+
+  let [showAdvanced, setShowAdvanced] = useState(false);
 
   let submit = e => {
     e.preventDefault();
-    state.set('userInteracted', true);
+    setProps('userInteracted', true);
     let roomId;
     if (name) {
       let slug = slugify(name, {lower: true, strict: true});
@@ -29,16 +32,9 @@ export default function Start({urlRoomId, roomFromURIError}) {
     }
 
     (async () => {
-      let roomCreated = await createRoom(
-        roomId,
-        name,
-        description,
-        logoURI,
-        color,
-        swarm.myPeerId
-      );
-      if (roomCreated) {
-        updateApiQuery(`/rooms/${roomId}`, roomCreated, 200);
+      let roomPosted = {name, description, logoURI, color, stageOnly};
+      let ok = await createRoom(roomId, roomPosted);
+      if (ok) {
         if (urlRoomId !== roomId) navigate('/' + roomId);
         enterRoom(roomId);
       }
@@ -50,6 +46,7 @@ export default function Start({urlRoomId, roomFromURIError}) {
     return humins.sort(() => Math.random() - 0.5);
   }, []);
 
+  const roomColors = colors(newRoom);
   return (
     <Container style={{height: 'initial', minHeight: '100%'}}>
       <div className="p-6 md:p-10">
@@ -61,10 +58,8 @@ export default function Start({urlRoomId, roomFromURIError}) {
           }
         >
           The Room ID{' '}
-          <code className="text-gray-900 bg-yellow-200">
-            {window.location.pathname.substring(1)}
-          </code>{' '}
-          is not valid.
+          <code className="text-gray-900 bg-yellow-200">{urlRoomId}</code> is
+          not valid.
           <br />
           <a
             href="https://gitlab.com/jam-systems/jam"
@@ -76,14 +71,12 @@ export default function Start({urlRoomId, roomFromURIError}) {
           </a>
           <br />
           <br />
-          You can use the form below to start a room.
+          You can use the button below to start a room.
         </div>
 
         <h1>Start a Room</h1>
 
-        <p className="text-gray-600">
-          Click on the button below to start a room.
-        </p>
+        <p>Click on the button below to start a room.</p>
 
         <form className="pt-6" onSubmit={submit}>
           <div className="hidden">
@@ -221,7 +214,8 @@ export default function Start({urlRoomId, roomFromURIError}) {
 
           <button
             onClick={submit}
-            className="select-none h-12 px-6 text-lg text-black bg-gray-200 rounded-lg focus:shadow-outline active:bg-gray-300"
+            className="select-none h-12 px-6 text-lg text-black rounded-lg focus:shadow-outline"
+            style={{backgroundColor: roomColors.buttonSecondary}}
           >
             🌱 Start room
           </button>
@@ -229,53 +223,59 @@ export default function Start({urlRoomId, roomFromURIError}) {
 
         <hr className="mt-14 mb-14" />
 
-        <h1>Welcome to Jam</h1>
+        {!window.jamConfig.hideJamInfo && (
+          <div>
+            <h1>Welcome to Jam</h1>
 
-        <div className="flex flex-row pt-4 pb-4">
-          <div className="flex-1 text-gray-600 pt-6">
-            Jam is an <span className="italic">audio&nbsp;space</span>
-            <br />
-            for chatting, brainstorming, debating, jamming,
-            <br />
-            micro-conferences and more.
-            <br />
-            <br />
-            <a
-              href="https://gitlab.com/jam-systems/jam"
-              className="underline text-blue-800 active:text-blue-600"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Learn&nbsp;more&nbsp;about&nbsp;Jam.
-            </a>
-            <br />
-            <br />
-            <br />
-            Jam <b className="font-semibold">Pro</b> (Early Access): Make Jam
-            your own.
-            <br />
-            Set your own colors and logo, use your own domain.
-            <br />
-            <br />
-            <a
-              href="https://pro.jam.systems"
-              className="underline text-blue-800 active:text-blue-600"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Sign up for the Jam Pro Early Access Program.
-            </a>
+            <div className="flex flex-row pt-4 pb-4">
+              <div className="flex-1 pt-6">
+                Jam is an <span className="italic">audio&nbsp;space</span>
+                <br />
+                for chatting, brainstorming, debating, jamming,
+                <br />
+                micro-conferences and more.
+                <br />
+                <br />
+                <a
+                  href="https://gitlab.com/jam-systems/jam"
+                  className="underline"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{color: roomColors.link}}
+                >
+                  Learn&nbsp;more&nbsp;about&nbsp;Jam.
+                </a>
+                <br />
+                <br />
+                <br />
+                Jam <b className="font-semibold">Pro</b> (Early Access): Make
+                Jam your own.
+                <br />
+                Set your own colors and logo, use your own domain.
+                <br />
+                <br />
+                <a
+                  href="https://pro.jam.systems"
+                  className="underline"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{color: roomColors.link}}
+                >
+                  Sign up for the Jam Pro Early Access Program.
+                </a>
+              </div>
+              <div className="flex-initial">
+                <img
+                  className="mt-8 md:mt-4 md:mb-4 md:mr-8"
+                  style={{width: 130, height: 130}}
+                  alt="Jam mascot by @eejitlikeme"
+                  title="Jam mascot by @eejitlikeme"
+                  src="/img/jam.jpg"
+                />
+              </div>
+            </div>
           </div>
-          <div className="flex-initial">
-            <img
-              className="mt-8 md:mt-4 md:mb-4 md:mr-8"
-              style={{width: 130, height: 130}}
-              alt="Jam mascot by @eejitlikeme"
-              title="Jam mascot by @eejitlikeme"
-              src="/img/jam.jpg"
-            />
-          </div>
-        </div>
+        )}
 
         <div className="pt-32 text-xs text-gray-400 text-center">
           <a

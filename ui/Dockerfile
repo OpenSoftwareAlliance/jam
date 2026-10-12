@@ -2,21 +2,24 @@ FROM node:alpine AS builder
 
 COPY yarn.lock package.json ./
 
-RUN yarn install && yarn global add esbuild
+RUN yarn
 COPY . .
-RUN npx esbuild --bundle ./App.jsx --outfile=./bundle.js --minify --format=esm --target=es6 --define:process.env.NODE_ENV='"production"'
+RUN yarn build
 
 FROM node:alpine
+
+ENV JAM_CONFIG_DIR=/jam-config
 
 RUN mkdir /app
 WORKDIR /app
 
-COPY css ./css/
-COPY img ./img/
+COPY public ./public/
 COPY server ./server/
-COPY --from=builder /bundle.js ./
-RUN yarn add express ejs node-fetch
+COPY server-package.json package.json
+COPY --from=builder /public/js ./public/js/
+COPY --from=builder /public/css/tailwind.css ./public/css
+RUN yarn
 
-CMD node server/bin/www
+CMD node server/bin/www.js
 
 EXPOSE 3000

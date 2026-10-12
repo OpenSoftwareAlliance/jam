@@ -1,9 +1,9 @@
 version: '3'
 services:
   coturn:
-    image: woahbase/alpine-coturn
+    image: coturn/coturn:alpine
     volumes:
-      - "./turnserver.conf:/var/lib/coturn/turnserver.conf"
+      - "./turnserver.conf:/etc/coturn/turnserver.conf"
     network_mode: host
     restart: always
     profiles: ["coturn"]
@@ -40,14 +40,6 @@ services:
       - traefik.http.routers.grafana.tls.certresolver=letsencrypt
       - traefik.enable=true
     profiles: [ "metrics" ]
-  postgres:
-    image: postgres:12
-    restart: always
-    environment:
-      POSTGRES_USER: jam
-      POSTGRES_PASSWORD: jam
-    volumes:
-      - ../data/postgres:/var/lib/postgresql/data
   ui:
     image: registry.gitlab.com/jam-systems/jam/ui:${CHANNEL}
     restart: always
@@ -58,19 +50,42 @@ services:
       - JAM_TURN_SERVER_USERNAME
       - JAM_TURN_SERVER_CREDENTIAL
       - JAM_RESTRICT_ROOM_CREATION
+      - JAM_SFU
+      - JAM_HIDE_JAM_INFO
+      - SLACK_CLIENT_ID
+      - SLACK_CLIENT_SECRET
+      - SLACK_API_URL
     labels:
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}_ui.rule=Host(`${JAM_HOST}`)
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}_ui.tls=true
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}_ui.tls.certresolver=letsencrypt
       - traefik.enable=true
+    volumes:
+      - "../jam-config:/jam-config"
   pantryredis:
     image: library/redis
     volumes:
       - "../data/pantryredis:/data"
     command: "redis-server --appendonly yes"
+  pantry-sfu:
+    #build: ../pantry-sfu
+    image: registry.gitlab.com/jam-systems/jam/pantry-sfu:${CHANNEL}
+    restart: always
+    network_mode: host
+    depends_on:
+      - pantry
+    environment:
+      - JAM_HOST
+      - JAM_SFU_EXTERNAL_IP
+      - MEDIASOUP_MIN_PORT
+      - MEDIASOUP_MAX_PORT
+    profiles: [ "sfu" ]
   pantry:
+    #build: ../pantry
     image: registry.gitlab.com/jam-systems/jam/pantry:${CHANNEL}
     restart: always
+    depends_on:
+      - pantryredis
     environment:
       - JAM_HOST
       - JAM_RESTRICT_ROOM_CREATION
@@ -81,16 +96,8 @@ services:
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}_pantry.tls=true
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}_pantry.tls.certresolver=letsencrypt
       - traefik.enable=true
-  signalhub:
-    image: registry.gitlab.com/jam-systems/jam/signalhub:${CHANNEL}
-    restart: always
-    labels:
-      - traefik.http.routers.${COMPOSE_PROJECT_NAME}_signalhub.rule=(Host(`${JAM_HOST}`) && PathPrefix(`/_/signalhub`))
-      - traefik.http.routers.${COMPOSE_PROJECT_NAME}_signalhub.middlewares=${COMPOSE_PROJECT_NAME}_signalhub_stripprefix
-      - traefik.http.middlewares.${COMPOSE_PROJECT_NAME}_signalhub_stripprefix.stripprefix.prefixes=/_/signalhub
-      - traefik.http.routers.${COMPOSE_PROJECT_NAME}_signalhub.tls=true
-      - traefik.http.routers.${COMPOSE_PROJECT_NAME}_signalhub.tls.certresolver=letsencrypt
-      - traefik.enable=true
+    volumes:
+      - "../jam-config:/jam-config"
   traefik:
     hostname: traefik
     image: traefik
@@ -124,4 +131,3 @@ services:
 volumes:
   prometheus_data: {}
   grafana_data: {}
-

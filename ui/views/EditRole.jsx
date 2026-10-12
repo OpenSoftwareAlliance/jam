@@ -1,60 +1,101 @@
 import React from 'react';
-import {addRole, removeRole, leaveStage} from '../logic/room';
-import identity from '../logic/identity';
-import {state} from '../logic/main';
 import {use} from 'use-minimal-state';
 import {openModal} from './Modal';
 import EditIdentity from './EditIdentity';
-import {useMqParser} from '../logic/tailwind-mqp';
+import {useMqParser} from '../lib/tailwind-mqp';
 import {ButtonContainer, SecondaryButton} from './Button';
 import StreamingModal from './StreamingModal';
+import {useJam, useApiQuery} from '../jam-core-react';
 
-export default function EditRole({peerId, speakers, moderators, onCancel}) {
+export default function EditRole({
+  peerId,
+  speakers,
+  moderators,
+  stageOnly = false,
+  onCancel,
+}) {
+  const [state, api] = useJam();
+  const {
+    addSpeaker,
+    addModerator,
+    removeSpeaker,
+    removeModerator,
+    addAdmin,
+    removeAdmin,
+  } = api;
+  let [myId, roomId] = use(state, ['myId', 'roomId']);
   let mqp = useMqParser();
+  let [myAdminStatus] = useApiQuery(`/admin/${myId}`, {fetchOnMount: true});
+  let [peerAdminStatus] = useApiQuery(`/admin/${peerId}`, {fetchOnMount: true});
+
+  let isSpeaker = stageOnly || speakers.includes(peerId);
+  let isModerator = moderators.includes(peerId);
+
   return (
     <div className={mqp('md:p-10')}>
+      {myAdminStatus?.admin && (
+        <div>
+          <h3 className="font-medium">Admin Actions</h3>
+          <br />
+          {(peerAdminStatus?.admin && (
+            <button
+              onClick={() => removeAdmin(peerId).then(onCancel)}
+              className={
+                'mb-2 h-12 px-6 text-lg text-black bg-gray-200 rounded-lg focus:shadow-outline active:bg-gray-300 mr-2'
+              }
+            >
+              ❎️ Remove Admin
+            </button>
+          )) || (
+            <button
+              onClick={() => addAdmin(peerId).then(onCancel)}
+              className={
+                'mb-2 h-12 px-6 text-lg text-black bg-gray-200 rounded-lg focus:shadow-outline active:bg-gray-300 mr-2'
+              }
+            >
+              👑️ Make Admin
+            </button>
+          )}
+          <br />
+          <br />
+          <hr />
+          <br />
+        </div>
+      )}
       <h3 className="font-medium">Moderator Actions</h3>
       <br />
-      <button
-        onClick={() => addRole(peerId, 'speakers').then(onCancel)}
-        className={
-          speakers.includes(peerId)
-            ? 'hidden'
-            : 'mb-2 h-12 px-6 text-lg text-black bg-gray-200 rounded-lg focus:shadow-outline active:bg-gray-300 mr-2'
-        }
-      >
-        ↑ Invite to Stage
-      </button>
-      <button
-        onClick={() => removeRole(peerId, 'speakers').then(onCancel)}
-        className={
-          speakers.includes(peerId)
-            ? 'mb-2 h-12 px-6 text-lg text-black bg-gray-200 rounded-lg focus:shadow-outline active:bg-gray-300 mr-2'
-            : 'hidden'
-        }
-      >
-        ↓ Move to Audience
-      </button>
-      <button
-        onClick={() => addRole(peerId, 'moderators').then(onCancel)}
-        className={
-          !speakers.includes(peerId) || moderators.includes(peerId)
-            ? 'hidden'
-            : 'mb-2 h-12 px-6 text-lg text-black bg-gray-200 rounded-lg focus:shadow-outline active:bg-gray-300 mr-2'
-        }
-      >
-        ✳️ Make Moderator
-      </button>
-      <button
-        onClick={() => removeRole(peerId, 'moderators').then(onCancel)}
-        className={
-          moderators.includes(peerId)
-            ? 'mb-2 h-12 px-6 text-lg text-black bg-gray-200 rounded-lg focus:shadow-outline active:bg-gray-300 mr-2'
-            : 'hidden'
-        }
-      >
-        ❎ Demote Moderator
-      </button>
+      {!stageOnly &&
+        (isSpeaker ? (
+          <button
+            onClick={() => removeSpeaker(roomId, peerId).then(onCancel)}
+            className="mb-2 h-12 px-6 text-lg text-black bg-gray-200 rounded-lg focus:shadow-outline active:bg-gray-300 mr-2"
+          >
+            ↓ Move to Audience
+          </button>
+        ) : (
+          <button
+            onClick={() => addSpeaker(roomId, peerId).then(onCancel)}
+            className="mb-2 h-12 px-6 text-lg text-black bg-gray-200 rounded-lg focus:shadow-outline active:bg-gray-300 mr-2"
+          >
+            ↑ Invite to Stage
+          </button>
+        ))}
+      {isSpeaker && !isModerator && (
+        <button
+          onClick={() => addModerator(roomId, peerId).then(onCancel)}
+          className="mb-2 h-12 px-6 text-lg text-black bg-gray-200 rounded-lg focus:shadow-outline active:bg-gray-300 mr-2"
+        >
+          ✳️ Make Moderator
+        </button>
+      )}
+      {isModerator && (
+        <button
+          onClick={() => removeModerator(roomId, peerId).then(onCancel)}
+          className="mb-2 h-12 px-6 text-lg text-black bg-gray-200 rounded-lg focus:shadow-outline active:bg-gray-300 mr-2"
+        >
+          ❎ Demote Moderator
+        </button>
+      )}
       <button
         onClick={onCancel}
         className="mb-2 h-12 px-6 text-lg text-black bg-gray-100 rounded-lg focus:shadow-outline active:bg-gray-300"
@@ -69,37 +110,69 @@ export default function EditRole({peerId, speakers, moderators, onCancel}) {
 }
 
 export function EditSelf({onCancel}) {
+  const [
+    state,
+    {
+      leaveStage,
+      addSpeaker,
+      removeSpeaker,
+      startRecording,
+      stopRecording,
+      downloadRecording,
+      startPodcastRecording,
+      stopPodcastRecording,
+    },
+  ] = useJam();
   let mqp = useMqParser();
-  let myPeerId = identity.publicKey;
-  let [iSpeak, iModerate] = use(state, ['iAmSpeaker', 'iAmModerator']);
+  let [
+    iSpeak,
+    iModerate,
+    room,
+    myId,
+    roomId,
+    isRecording,
+    isPodcasting,
+  ] = use(state, [
+    'iAmSpeaker',
+    'iAmModerator',
+    'room',
+    'myId',
+    'roomId',
+    'isRecording',
+    'isPodcasting',
+  ]);
+  let stageOnly = !!room?.stageOnly;
+  iSpeak = stageOnly || iSpeak;
   return (
     <div className={mqp('md:p-10')}>
       <h3 className="font-medium">Actions</h3>
       <br />
       <ButtonContainer>
-        <SecondaryButton
-          onClick={() => {
-            openModal(EditIdentity);
-            onCancel();
-          }}
-        >
-          Edit Profile
-        </SecondaryButton>
-        {iModerate && !iSpeak && (
+        {!room.access?.lockedIdentities && (
           <SecondaryButton
-            onClick={() => addRole(myPeerId, 'speakers').then(onCancel)}
+            onClick={() => {
+              openModal(EditIdentity);
+              onCancel();
+            }}
+          >
+            Edit Profile
+          </SecondaryButton>
+        )}
+        {!stageOnly && iModerate && !iSpeak && (
+          <SecondaryButton
+            onClick={() => addSpeaker(roomId, myId).then(onCancel)}
           >
             ↑ Move to Stage
           </SecondaryButton>
         )}
-        {iModerate && iSpeak && (
+        {!stageOnly && iModerate && iSpeak && (
           <SecondaryButton
-            onClick={() => removeRole(myPeerId, 'speakers').then(onCancel)}
+            onClick={() => removeSpeaker(roomId, myId).then(onCancel)}
           >
             ↓ Leave Stage
           </SecondaryButton>
         )}
-        {!iModerate && iSpeak && (
+        {!stageOnly && !iModerate && iSpeak && (
           <SecondaryButton
             onClick={() => {
               leaveStage();
@@ -109,14 +182,47 @@ export function EditSelf({onCancel}) {
             ↓ Leave Stage
           </SecondaryButton>
         )}
-        <SecondaryButton
-          onClick={() => {
-            openModal(StreamingModal);
-            onCancel();
-          }}
-        >
-          Stream audio
-        </SecondaryButton>
+        {iSpeak && (
+          <SecondaryButton
+            onClick={() => {
+              openModal(StreamingModal);
+              onCancel();
+            }}
+          >
+            Stream Audio
+          </SecondaryButton>
+        )}
+        {iModerate && (
+          <SecondaryButton
+            onClick={() => {
+              if (isRecording) {
+                stopRecording();
+                downloadRecording('my-recording');
+              } else {
+                startRecording();
+              }
+              onCancel();
+            }}
+          >
+            {isRecording ? 'Stop Room Recording' : 'Start Room Recording'}
+          </SecondaryButton>
+        )}
+        {iModerate && (
+          <SecondaryButton
+            onClick={() => {
+              if (isPodcasting) {
+                stopPodcastRecording();
+              } else {
+                startPodcastRecording();
+              }
+              onCancel();
+            }}
+          >
+            {isPodcasting
+              ? 'Stop Podcast Recording'
+              : 'Start Podcast Recording'}
+          </SecondaryButton>
+        )}
         <SecondaryButton light onClick={onCancel}>
           Cancel
         </SecondaryButton>

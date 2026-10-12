@@ -1,132 +1,128 @@
-const nacl = require('tweetnacl');
-const base64 = require('compact-base64');
-const { get, set } = require('../services/redis');
-const { permitAllAuthenticator } = require('../routes/controller');
-const verifyIdentities = require("../verifications");
-const { restrictRoomCreation } = require('../config');
+const {get, set} = require('../services/redis');
+const {permitAllAuthenticator} = require('../routes/controller');
+const verifyIdentities = require('../verifications');
+const {restrictRoomCreation} = require('../config');
 
-const decode = (base64String) => Uint8Array.from(base64.decodeUrl(base64String, 'binary'));
-const timeCodeFromBytes = (timeCodeBytes) => timeCodeBytes[0] +
-    (timeCodeBytes[1] << 8) +
-    (timeCodeBytes[2] << 16) +
-    (timeCodeBytes[3] << 24);
-const currentTimeCode = () => Math.round(Date.now() / 30000);
-const timeCodeValid = code => Math.abs(code - currentTimeCode()) <= 10;
+const isAnyInList = (tokens, publicKeys) => {
+  return tokens.some(token => publicKeys.includes(token));
+};
 
-const verify = (authToken, key) => {
-    const timeCodeBytes = nacl.sign.open(
-        decode(authToken),
-        decode(key)
-    );
-    return (
-        timeCodeBytes &&
-        timeCodeValid(timeCodeFromBytes(timeCodeBytes))
-    );
-}
-
-const extractToken = (req) => {
-    const authHeader = req.header("Authorization") || '';
-    return authHeader.substring(6);
-}
-
-const isInList = (token, publicKeys) => {
-    for (const key of publicKeys)
-    {
-        if (verify(token, key)) {
-            return true;
-        }
-    }
-    return false
-}
-
+const hasAccessToRoom = async (req, roomId) => {
+  const roomInfo = await get('rooms/' + roomId);
+  if (!roomInfo) return false;
+  return isAnyInList(
+    req.ssrIdentities,
+    (roomInfo.access && roomInfo.access.identities) || []
+  );
+};
 
 const isModerator = async (req, roomId) => {
-    const roomInfo = await get('rooms/' + roomId);
-    if (!roomInfo) return false;
-    return isInList(extractToken(req), roomInfo['moderators']);
-}
+  const roomInfo = await get('rooms/' + roomId);
+  if (!roomInfo) return false;
+  return isAnyInList(req.ssrIdentities, roomInfo['moderators']);
+};
 
-const isAdmin = async (req) => {
-    return isInList(extractToken(req), await get('server/admins'));
-}
+const identityIsAdmin = async identityKeys => {
+  const adminKeys = await get('server/admins');
+  return isAnyInList(identityKeys, adminKeys);
+};
 
-const initializeServerAdminIfNecessary = async (req) => {
-    const moderators = await get('server/admins');
-    if(!moderators || moderators.length === 0) {
-        await set('server/admins', [req.params.id])
-    }
-}
+const isAdmin = async req => {
+  return await identityIsAdmin(req.ssrIdentities);
+};
+
+const addAdmin = async serverAdminId => {
+  const currentServerAdmins = await get('server/admins');
+  if (currentServerAdmins && !currentServerAdmins.includes(serverAdminId)) {
+    currentServerAdmins.push(serverAdminId);
+    await set('server/admins', currentServerAdmins);
+  } else {
+    await set('server/admins', [serverAdminId]);
+  }
+};
+
+const removeAdmin = async serverAdminId => {
+  const currentServerAdmins = await get('server/admins');
+  const newServerAdmins = currentServerAdmins.filter(e => e !== serverAdminId);
+  await set('server/admins', newServerAdmins);
+};
+
+const initializeServerAdminIfNecessary = async req => {
+  const admins = await get('server/admins');
+  if (!admins || admins.length === 0) {
+    await set('server/admins', [req.params.id]);
+  }
+};
 
 const roomAuthenticator = {
-    ...permitAllAuthenticator,
-    canPost: async (req, res, next) => {
-        if(restrictRoomCreation && !(await isAdmin(req)))
-        {
-            res.sendStatus(403);
-            return;
-        }
-
-        const roomId = req.params.id;
-        if(!/^[\w-]{4,}$/.test(roomId)) {
-            res.sendStatus(403);
-            return;
-        }
-        next();
-    },
-    canPut: async (req, res, next) => {
-        const roomId = req.params.id;
-
-        if(!req.header("Authorization")) {
-            res.sendStatus(401);
-            return
-        }
-        if(!isModerator(req, roomId)) {
-            res.sendStatus(403);
-            return
-        }
-        next();
+  ...permitAllAuthenticator,
+  canPost: async (req, res, next) => {
+    if (restrictRoomCreation && !(await isAdmin(req))) {
+      res.sendStatus(403);
+      return;
     }
-}
+
+    const roomId = req.params.id;
+    if (!/^[\w-]{4,}$/.test(roomId)) {
+      res.sendStatus(403);
+      return;
+    }
+    next();
+  },
+  canPut: async (req, res, next) => {
+    const roomId = req.params.id;
+
+    if (req.ssrIdentities.length === 0) {
+      res.sendStatus(401);
+      return;
+    }
+    if (!(await isModerator(req, roomId))) {
+      res.sendStatus(403);
+      return;
+    }
+    next();
+  },
+};
 
 const identityAuthenticator = {
-    ...permitAllAuthenticator,
-    canPost: async (req, res, next) => {
-        await initializeServerAdminIfNecessary(req);
-        next()
-    },
-    canPut: async (req, res, next) => {
-        const authHeader = req.header("Authorization");
+  ...permitAllAuthenticator,
+  canPost: async (req, res, next) => {
+    await initializeServerAdminIfNecessary(req);
+    next();
+  },
+  canPut: async (req, res, next) => {
+    if (req.ssrIdentities.length === 0) {
+      res.sendStatus(401);
+      return;
+    }
 
-        if(!authHeader) {
-            res.sendStatus(401);
-            return
-        }
+    if (req.body.identities) {
+      try {
+        await verifyIdentities(req.body.identities, req.params.id);
+      } catch (error) {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: 'identity-verification-failed',
+            message: error.message,
+          },
+        });
+        return;
+      }
+    }
 
-        const token = authHeader.substring(6);
-        if(!verify(token, req.params.id)) {
-            res.sendStatus(403);
-            return
-        }
+    await initializeServerAdminIfNecessary(req);
+    next();
+  },
+};
 
-        if(req.body.identities) {
-            try {
-                await verifyIdentities(req.body.identities, req.params.id);
-            } catch(error) {
-                res.status(400).json(
-                    {
-                        success: false,
-                        error: {
-                            code: "identity-verification-failed",
-                            message: error.message
-                        }
-                    });
-                return
-            }
-        }
-
-        await initializeServerAdminIfNecessary(req);
-        next();
-    },
-}
-
-module.exports = {verify, isModerator, isAdmin, roomAuthenticator, identityAuthenticator}
+module.exports = {
+  isModerator,
+  identityIsAdmin,
+  isAdmin,
+  addAdmin,
+  removeAdmin,
+  roomAuthenticator,
+  identityAuthenticator,
+  hasAccessToRoom,
+};

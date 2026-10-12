@@ -1,49 +1,64 @@
 import React, {useState} from 'react';
-import state from '../logic/state';
 import {use} from 'use-minimal-state';
-import swarm from '../lib/swarm';
 import EnterRoom from './EnterRoom';
 import RoomHeader from './RoomHeader';
-import identity from '../logic/identity';
 import {openModal} from './Modal';
 import {EditRoomModal} from './EditRoom';
 import useWakeLock from '../lib/use-wake-lock';
 import {AudienceAvatar, StageAvatar} from './Avatar';
-import {useMqParser} from '../logic/tailwind-mqp';
+import {useMqParser} from '../lib/tailwind-mqp';
 import Container from './Container';
 import Navigation from './Navigation';
-import UAParser from 'ua-parser-js';
+import {userAgent} from '../lib/user-agent';
+import {colors} from '../lib/theme.js';
+import {usePushToTalk, useCtrlCombos} from '../lib/hotkeys';
+import {useJam} from '../jam-core-react';
 
-export default function Room({room, roomId}) {
-  // room = {name, description, moderators: [peerId], speakers: [peerId]}
+const inWebView =
+  userAgent.browser?.name !== 'JamWebView' &&
+  (userAgent.browser?.name === 'Chrome WebView' ||
+    (userAgent.os?.name === 'iOS' &&
+      userAgent.browser?.name !== 'Mobile Safari'));
+
+export default function Room({room, roomId, uxConfig}) {
+  // room = {name, description, moderators: [peerId], speakers: [peerId], access}
+  const [state] = useJam();
   useWakeLock();
+  usePushToTalk();
+  useCtrlCombos();
 
-  let userAgent = UAParser();
-  let inWebView = (userAgent.browser?.name == "Chrome WebView") || ((userAgent.os?.name == "iOS") && (userAgent.browser?.name != "Mobile Safari"))
-
-  let myInfo = use(identity, 'info');
   let [
     reactions,
-    raisedHands,
+    handRaised,
     identities,
     speaking,
     iSpeak,
     iModerate,
+    iMayEnter,
+    myIdentity,
+    inRoom,
+    peers,
+    peerState,
+    myPeerState,
+    hasMicFailed,
   ] = use(state, [
     'reactions',
-    'raisedHands',
+    'handRaised',
     'identities',
     'speaking',
     'iAmSpeaker',
     'iAmModerator',
-  ]);
-  let [peers, peerState, sharedState] = use(swarm, [
-    'stickyPeers',
+    'iAmAuthorized',
+    'myIdentity',
+    'inRoom',
+    'peers',
     'peerState',
-    'sharedState',
+    'myPeerState',
+    'hasMicFailed',
   ]);
 
-  let hasEnteredRoom = sharedState?.inRoom;
+  let myInfo = myIdentity.info;
+  let hasEnteredRoom = inRoom === roomId;
 
   let [editRole, setEditRole] = useState(null);
   let [editSelf, setEditSelf] = useState(false);
@@ -51,16 +66,22 @@ export default function Room({room, roomId}) {
   let {
     name,
     description,
+    schedule,
     logoURI,
     buttonURI,
     buttonText,
     speakers,
     moderators,
     closed,
+    stageOnly,
     shareUrl,
   } = room || {};
 
   let mqp = useMqParser();
+
+  if (!iMayEnter) {
+    return <EnterRoom roomId={roomId} name={name} forbidden={true} />;
+  }
 
   if (!iModerate && closed) {
     return (
@@ -68,6 +89,7 @@ export default function Room({room, roomId}) {
         roomId={roomId}
         name={name}
         description={description}
+        schedule={schedule}
         logoURI={logoURI}
         closed={closed}
         buttonURI={buttonURI}
@@ -82,18 +104,21 @@ export default function Room({room, roomId}) {
         roomId={roomId}
         name={name}
         description={description}
+        schedule={schedule}
         logoURI={logoURI}
       />
     );
   }
 
-  let myPeerId = identity.publicKey;
-  let stagePeers = (speakers || []).filter(id => id in peers);
-  let audiencePeers = Object.keys(peers || {}).filter(
-    id => !stagePeers.includes(id)
-  );
+  let myPeerId = myInfo.id;
+  let stagePeers = stageOnly
+    ? peers
+    : (speakers ?? []).filter(id => peers.includes(id));
+  let audiencePeers = stageOnly
+    ? []
+    : peers.filter(id => !stagePeers.includes(id));
 
-  let myHandRaised = raisedHands.has(myPeerId);
+  let {noLeave} = uxConfig;
 
   return (
     <Container style={{display: 'flex', flexDirection: 'column'}}>
@@ -123,8 +148,18 @@ export default function Room({room, roomId}) {
               d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
             />
           </svg>
-          Open in {userAgent.os?.name == "iOS" ? "Safari" : "Chrome"} for best experience.<br/>
-          <a class="underline" href="https://gitlab.com/jam-systems/jam" target="_blank" rel="nofollow">Learn more</a>.
+          Open in {userAgent.os?.name === 'iOS' ? 'Safari' : 'Chrome'} for best
+          experience.
+          <br />
+          <a
+            className="underline"
+            href="https://gitlab.com/jam-systems/jam"
+            target="_blank"
+            rel="nofollow noreferrer"
+          >
+            Learn more
+          </a>
+          .
         </div>
         <div
           className={
@@ -151,6 +186,7 @@ export default function Room({room, roomId}) {
           Room is closed
         </div>
         <RoomHeader
+          colors={colors(room)}
           {...{name, description, logoURI, buttonURI, buttonText}}
           editRoom={
             iModerate && (() => openModal(EditRoomModal, {roomId, room}))
@@ -166,18 +202,19 @@ export default function Room({room, roomId}) {
                 <StageAvatar
                   key={myPeerId}
                   peerId={myPeerId}
-                  {...{speaking, moderators, reactions}}
-                  peerState={sharedState}
+                  {...{speaking, moderators, reactions, room}}
+                  canSpeak={!hasMicFailed}
+                  peerState={myPeerState}
                   info={myInfo}
-                  // onClick={() => openModal(EditIdentity)}
                   onClick={() => setEditSelf(true)}
                 />
               )}
               {stagePeers.map(peerId => (
                 <StageAvatar
                   key={peerId}
-                  {...{speaking, moderators}}
+                  {...{speaking, moderators, room}}
                   {...{peerId, peerState, reactions}}
+                  canSpeak={true}
                   peerState={peerState[peerId]}
                   info={identities[peerId]}
                   onClick={iModerate ? () => setEditRole(peerId) : undefined}
@@ -188,37 +225,50 @@ export default function Room({room, roomId}) {
 
           <br />
           {/* Audience */}
-          <h3 className="text-gray-400 pl-4 pb-4">Audience</h3>
-          <ol className="flex flex-wrap">
-            {!iSpeak && (
-              <AudienceAvatar
-                {...{reactions}}
-                peerId={myPeerId}
-                peerState={sharedState}
-                info={myInfo}
-                handRaised={myHandRaised}
-                // onClick={() => openModal(EditIdentity)}
-                onClick={() => setEditSelf(true)}
-              />
-            )}
-            {audiencePeers.map(peerId => (
-              <AudienceAvatar
-                key={peerId}
-                {...{peerId, peerState, reactions}}
-                peerState={peerState[peerId]}
-                info={identities[peerId]}
-                handRaised={iModerate && raisedHands.has(peerId)}
-                onClick={iModerate ? () => setEditRole(peerId) : undefined}
-              />
-            ))}
-          </ol>
+          {!stageOnly && (
+            <>
+              <h3 className="pl-4 pb-4" style={{color: colors(room).textLight}}>
+                Audience
+              </h3>
+              <ol className="flex flex-wrap">
+                {!iSpeak && (
+                  <AudienceAvatar
+                    {...{reactions, room}}
+                    peerId={myPeerId}
+                    peerState={myPeerState}
+                    info={myInfo}
+                    handRaised={handRaised}
+                    onClick={() => setEditSelf(true)}
+                  />
+                )}
+                {audiencePeers.map(peerId => (
+                  <AudienceAvatar
+                    key={peerId}
+                    {...{peerId, peerState, reactions, room}}
+                    peerState={peerState[peerId]}
+                    info={identities[peerId]}
+                    handRaised={iModerate && peerState[peerId]?.handRaised}
+                    onClick={iModerate ? () => setEditRole(peerId) : undefined}
+                  />
+                ))}
+              </ol>
+            </>
+          )}
         </div>
 
         <div style={{height: '136px', flex: 'none'}} />
       </div>
 
       <Navigation
-        {...{roomId, room, editRole, setEditRole, editSelf, setEditSelf}}
+        {...{
+          roomId,
+          room,
+          editRole,
+          setEditRole,
+          editSelf,
+          setEditSelf,
+          noLeave,
+        }}
       />
     </Container>
   );

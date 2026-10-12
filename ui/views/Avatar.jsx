@@ -1,12 +1,16 @@
 import React, {useEffect, useState} from 'react';
-import {avatarUrl} from '../lib/avatar';
+import {avatarUrl, displayName} from '../lib/avatar';
 import animateEmoji from '../lib/animate-emoji';
-import {useMqParser} from '../logic/tailwind-mqp';
+import {useMqParser} from '../lib/tailwind-mqp';
+import {colors} from '../lib/theme';
+import {MicOffSvg} from './Svg';
 
 const reactionEmojis = ['❤️', '💯', '😂', '😅', '😳', '🤔'];
 
 export function StageAvatar({
+  room,
   speaking,
+  canSpeak,
   moderators,
   peerId,
   peerState,
@@ -20,91 +24,78 @@ export function StageAvatar({
   info = info || {id: peerId};
   let isSpeaking = speaking.has(peerId);
   let isModerator = moderators.includes(peerId);
+  const roomColors = colors(room);
   return (
     inRoom && (
       <li
         key={peerId}
-        title={info.displayName}
+        title={displayName(info, room)}
         className="relative items-center space-y-1 mt-4 ml-2 mr-2"
         style={onClick ? {cursor: 'pointer'} : undefined}
       >
         <div
-          className={
-            isSpeaking
-              ? 'human-radius p-1 bg-gray-300'
-              : 'human-radius p-1 bg-white'
-          }
+          className="human-radius p-1"
+          style={{
+            backgroundColor: isSpeaking
+              ? roomColors.textSuperLight
+              : roomColors.background,
+          }}
         >
-          <div className="human-radius p-1 bg-white relative flex justify-center">
+          <div
+            className="human-radius p-1 relative flex justify-center"
+            style={{backgroundColor: roomColors.background}}
+          >
             <img
               className={mqp(
                 'human-radius border border-gray-300 w-20 h-20 md:w-28 md:h-28 object-cover'
               )}
-              alt={info.displayName}
-              src={avatarUrl(info)}
+              alt={displayName(info, room)}
+              src={avatarUrl(info, room)}
               onClick={onClick}
             />
             <Reactions
               reactions={reactions_}
               className={mqp(
-                'absolute bg-white text-5xl md:text-7xl pt-4 md:pt-5 human-radius w-20 h-20 md:w-28 md:h-28 border text-center'
+                'absolute text-5xl md:text-7xl pt-4 md:pt-5 human-radius w-20 h-20 md:w-28 md:h-28 border text-center'
               )}
+              style={{backgroundColor: roomColors.buttonPrimary}}
             />
           </div>
         </div>
         {/* div for showing mute/unmute status */}
-        <div className={micMuted ? '' : 'hidden'}>
+        {(!!micMuted || !canSpeak) && (
           <div
             className={mqp(
               'absolute w-10 h-10 right-0 top-12 md:top-20 rounded-full bg-white border-2 text-2xl border-gray-400 flex items-center justify-center'
             )}
+            style={{backgroundColor: roomColors.textLight}}
           >
-            <svg
-              className="w-5 h-5 text-gray-700"
-              version="1.1"
-              xmlns="http://www.w3.org/2000/svg"
-              xmlns:xlink="http://www.w3.org/1999/xlink"
-              x="0px"
-              y="0px"
-              width="96.666px"
-              height="96.666px"
-              viewBox="0 0 96.666 96.666"
-              xml:space="preserve"
-              fill="currentColor"
-              stroke="white"
-              style={{transform: 'scale(-1,1)'}}
-            >
-              <g>
-                <g>
-                  <path d="M65.595,56.035V43.349L38.639,70.307c2.766,1.885,6.104,2.989,9.695,2.989C57.852,73.296,65.595,65.553,65.595,56.035z"/>
-                  <path d="M76.078,45.715H72.64c-1.104,0-2,0.896-2,2v7.029c0,12.3-10.007,22.308-22.308,22.308c-4.654,0-8.979-1.435-12.559-3.882
-                    l-5.245,5.245c4.037,3.084,8.856,5.177,14.086,5.835v4.98h-15.35c-1.104,0-2,0.896-2,2v3.436c0,1.104,0.896,2,2,2h38.138
-                    c1.104,0,2-0.896,2-2V91.23c0-1.104-0.896-2-2-2H52.051v-4.98c14.594-1.838,26.026-14.799,26.026-29.506v-7.029
-                    C78.078,46.61,77.182,45.715,76.078,45.715z"/>
-                  <path d="M85.972,7.694c-2.146-2.147-5.631-2.147-7.777,0l-12.6,12.6v-3.032C65.595,7.743,57.852,0,48.333,0
-                    c-9.519,0-17.262,7.743-17.262,17.262v37.554l-4.552,4.552c-0.317-1.493-0.494-3.038-0.494-4.624v-7.029c0-1.104-0.896-2-2-2
-                    h-3.437c-1.104,0-2,0.896-2,2v7.029c0,3.67,0.726,7.227,2.022,10.533l-9.917,9.916c-2.148,2.148-2.148,5.631,0,7.779
-                    c1.073,1.073,2.481,1.61,3.889,1.61s2.815-0.537,3.889-1.61l67.5-67.5C88.121,13.324,88.121,9.842,85.972,7.694z"/>
-                </g>
-              </g>
-            </svg>
+            <MicOffSvg
+              className="w-5 h-5"
+              fill={!canSpeak ? 'red' : undefined}
+              stroke={roomColors.text}
+            />
           </div>
-        </div>
+        )}
         <div className={mqp('w-20 md:w-28 m-2')}>
           <div className="flex">
             <div className={mqp('flex-none text-center pl-1 w-20 md:w-28')}>
               <span
                 className={mqp(
-                  'text-sm md:text-base whitespace-nowrap w-22 md:w-30 text-black font-medium'
+                  'text-sm md:text-base whitespace-nowrap w-22 md:w-30 font-medium'
                 )}
+                style={{color: roomColors.header}}
               >
                 <span
-                  style={{margin: '0 3px 0 -4px'}}
                   className={
                     isModerator
                       ? 'flex-none inline-block leading-3 bg-gray-600 text-white w-3 h-3 rounded-full -ml-3'
                       : 'hidden'
                   }
+                  style={{
+                    backgroundColor: roomColors.text,
+                    color: roomColors.background,
+                  }}
                 >
                   <svg
                     className="inline-block w-2 h-2"
@@ -118,8 +109,8 @@ export function StageAvatar({
                   >
                     <path d="M894.5,633.4L663.3,500l231.1-133.4c39.1-22.6,52.4-72.5,29.9-111.6c-22.6-39.1-72.5-52.4-111.6-29.9L581.7,358.5V91.7c0-45.1-36.6-81.7-81.7-81.7c-45.1,0-81.7,36.6-81.7,81.7v266.9L187.2,225.1c-39.1-22.6-89-9.2-111.6,29.9c-22.6,39.1-9.2,89,29.9,111.6L336.7,500L105.5,633.4C66.5,656,53.1,705.9,75.6,745c22.6,39.1,72.5,52.4,111.6,29.9l231.1-133.4v266.9c0,45.1,36.6,81.7,81.7,81.7c45.1,0,81.7-36.6,81.7-81.7V641.5l231.1,133.4c39.1,22.6,89,9.2,111.6-29.9C946.9,705.9,933.5,656,894.5,633.4z" />
                   </svg>
-                </span>
-                {info.displayName?.substring(0, 12)}
+                </span>{' '}
+                {displayName(info, room).substring(0, 12)}
               </span>
               <TwitterHandle
                 info={info}
@@ -135,6 +126,7 @@ export function StageAvatar({
 }
 
 export function AudienceAvatar({
+  room,
   peerId,
   peerState,
   reactions,
@@ -149,7 +141,7 @@ export function AudienceAvatar({
   return (
     inRoom && (
       <li
-        title={info.displayName}
+        title={displayName(info, room)}
         className={mqp('flex-none m-2 w-16 h-32 md:w-24 md:h-36 text-xs')}
         style={onClick ? {cursor: 'pointer'} : undefined}
       >
@@ -158,8 +150,8 @@ export function AudienceAvatar({
             className={mqp(
               'human-radius w-16 h-16 md:w-24 md:h-24 border border-gray-300 object-cover'
             )}
-            alt={info.displayName}
-            src={avatarUrl(info)}
+            alt={displayName(info, room)}
+            src={avatarUrl(info, room)}
             onClick={onClick}
           />
           <Reactions
@@ -179,7 +171,7 @@ export function AudienceAvatar({
           </div>
         </div>
         <div className="overflow-hidden whitespace-nowrap text-center mt-2">
-          {info.displayName}
+          {displayName(info, room)}
         </div>
         <TwitterHandle
           info={info}
@@ -199,7 +191,11 @@ function TwitterHandle({info, divClass, fontClass}) {
         <span className={fontClass}>
           {/* <span className="text-gray-800">@</span> */}
           <a
-            className="text-gray-500 font-medium ml-1"
+            className={
+              twitterIdentity.verificationInfo
+                ? 'text-blue-600 font-medium ml-1'
+                : 'text-gray-500 font-medium ml-1'
+            }
             style={{textDecoration: 'none', fontWeight: 'normal'}}
             href={'https://twitter.com/' + twitterIdentity?.id.replace('@', '')}
             target="_blank"

@@ -1,3 +1,17 @@
+<!-- osa:header:start -->
+# OSA Jam
+
+Live audio rooms. Open alternative to **Google Meet (audio)**, part of the [Open Software Alliance](https://github.com/OpenSoftwareAlliance) suite.
+
+| | |
+|---|---|
+| Upstream | [Jam](https://github.com/jam-systems/jam), kept in sync with this repository |
+| License | AGPL-3.0 |
+
+Credit for the original work goes to the Jam authors. Everything below this header is the upstream README.
+
+---
+<!-- osa:header:end -->
 <p align="center">
   <img title='Jam mascot by @eejitlikeme'
        src="https://jam.systems/img/jam.jpg"
